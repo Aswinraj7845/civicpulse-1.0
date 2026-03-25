@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CivicPulse PRO MAX</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+
+/* 🌌 BACKGROUND */
+body{
+  margin:0;
+  font-family:'Segoe UI';
+  background:
+    linear-gradient(rgba(219,234,254,0.85), rgba(240,249,255,0.9)),
+    url('https://images.unsplash.com/photo-1503264116251-35a269479413') no-repeat center/cover fixed;
+}
+
+/* NAVBAR */
+.navbar{
+  background: linear-gradient(90deg,#0284c7,#0ea5e9);
+  color:white;
+  padding:18px;
+  text-align:center;
+  font-size:24px;
+  font-weight:bold;
+}
+
+/* CONTAINER */
+.container{ max-width:1100px; margin:auto; padding:20px; }
+
+/* CARD */
+.card{
+  background: rgba(255,255,255,0.9);
+  padding:20px;
+  border-radius:18px;
+  margin-bottom:20px;
+  box-shadow:0 10px 25px rgba(0,0,0,0.1);
+}
+
+/* FILE INPUT */
+input[type="file"]{
+  width:100%;
+  padding:12px;
+  border-radius:10px;
+  border:2px dashed #38bdf8;
+  margin:10px 0;
+}
+
+/* BUTTON */
+button{
+  padding:10px 15px;
+  border:none;
+  border-radius:10px;
+  cursor:pointer;
+  margin:3px;
+  font-weight:bold;
+}
+
+.btn-main{ background:#0284c7; color:white; }
+
+/* GRID */
+.grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+
+.stat{ padding:12px; text-align:center; border-radius:12px; font-weight:bold; }
+.pending{ background:#fef3c7; }
+.assigned{ background:#dbeafe; }
+.progress{ background:#bae6fd; }
+.completed{ background:#bbf7d0; }
+
+/* IMAGE COMPARE */
+.compare{
+  display:flex;
+  gap:10px;
+}
+.compare img{
+  width:120px;
+  border-radius:10px;
+}
+
+/* PAGE */
+.page{ display:none; }
+.active{ display:block; }
+
+#map{ height:320px; border-radius:10px; }
+
+</style>
+</head>
+
+<body>
+
+<div class="navbar">💙 CivicPulse PRO MAX</div>
+
+<!-- HOME (Citizen) -->
+<div id="home" class="page active">
+<div class="container">
+
+<div class="card">
+<h3>Upload Complaint Proof</h3>
+
+<input type="file" id="photo" required>
+
+<button class="btn-main" onclick="addComplaint()">Submit</button>
+
+<br><br>
+
+<button onclick="openPage('admin')">👨‍💼 Admin</button>
+<button onclick="openPage('worker')">👷 Worker</button>
+<button onclick="openPage('analytics')">📊 Analytics</button>
+<button onclick="openPage('mapPage')">🗺 Map</button>
+
+</div>
+
+<div class="grid">
+<div class="stat pending">Pending <span id="p">0</span></div>
+<div class="stat assigned">Assigned <span id="a">0</span></div>
+<div class="stat progress">Progress <span id="pr">0</span></div>
+<div class="stat completed">Done <span id="c">0</span></div>
+</div>
+
+<div id="list"></div>
+
+</div>
+</div>
+
+<!-- WORKER -->
+<div id="worker" class="page">
+<div class="container">
+<button onclick="openPage('home')">⬅ Back</button>
+<div id="workerList"></div>
+</div>
+</div>
+
+<!-- ADMIN -->
+<div id="admin" class="page">
+<div class="container">
+<button onclick="openPage('home')">⬅ Back</button>
+<div id="adminList"></div>
+</div>
+</div>
+
+<!-- ANALYTICS -->
+<div id="analytics" class="page">
+<div class="container">
+<button onclick="openPage('home')">⬅ Back</button>
+<canvas id="chart"></canvas>
+</div>
+</div>
+
+<!-- MAP -->
+<div id="mapPage" class="page">
+<div class="container">
+<button onclick="openPage('home')">⬅ Back</button>
+<div id="map"></div>
+</div>
+</div>
+
+<script>
+
+let complaints = JSON.parse(localStorage.getItem('data')) || [];
+function save(){ localStorage.setItem('data',JSON.stringify(complaints)); }
+
+/* NAV */
+function openPage(id){
+ document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+ document.getElementById(id).classList.add('active');
+
+ if(id==='mapPage') setTimeout(()=>map.invalidateSize(),300);
+
+ renderAll();
+ if(id==='analytics') renderChart();
+}
+
+/* BASE64 */
+function toBase64(file){
+ return new Promise(res=>{
+  let r=new FileReader();
+  r.onload=e=>res(e.target.result);
+  r.readAsDataURL(file);
+ });
+}
+
+/* ADD (Citizen) */
+async function addComplaint(){
+
+ let file=document.getElementById('photo').files[0];
+ if(!file) return alert("Upload image!");
+
+ let img=await toBase64(file);
+
+ navigator.geolocation.getCurrentPosition(p=>{
+  complaints.unshift({
+   lat:p.coords.latitude,
+   lng:p.coords.longitude,
+   status:'Pending',
+   worker:null,
+   citizenImg:img,
+   workerImg:null
+  });
+
+  save(); renderAll();
+ });
+}
+
+/* RENDER */
+function renderAll(){
+ renderList();
+ renderWorker();
+ renderAdmin();
+ updateStats();
+ renderMap();
+}
+
+/* CITIZEN VIEW */
+function renderList(){
+ list.innerHTML='';
+
+ complaints.forEach(c=>{
+ list.innerHTML+=`
+ <div class='card'>
+ <b>Status:</b> ${c.status}<br><br>
+ <img src="${c.citizenImg}" width="120">
+ </div>`;
+ });
+}
+
+/* WORKER */
+function renderWorker(){
+ workerList.innerHTML='';
+
+ complaints.forEach((c,i)=>{
+ if(c.worker){
+ workerList.innerHTML+=`
+ <div class='card'>
+ Status: ${c.status}<br>
+
+ <input type='file' id='img${i}'>
+ <button onclick='finish(${i})'>Upload Work</button>
+ </div>`;
+ }
+ });
+}
+
+/* ADMIN */
+function renderAdmin(){
+ adminList.innerHTML='';
+
+ complaints.forEach((c,i)=>{
+ adminList.innerHTML+=`
+ <div class='card'>
+
+ <b>Status:</b> ${c.status}<br><br>
+
+ <div class="compare">
+  <div>
+   <p>Citizen</p>
+   <img src="${c.citizenImg}">
+  </div>
+
+  <div>
+   <p>Worker</p>
+   ${c.workerImg ? `<img src="${c.workerImg}">` : "No Image"}
+  </div>
+ </div>
+
+ <br>
+
+ <button onclick='assign(${i})'>Assign</button>
+ <button onclick='approve(${i})'>Approve ✅</button>
+ <button onclick='reject(${i})'>Reject ❌</button>
+
+ </div>`;
+ });
+}
+
+/* FLOW */
+function assign(i){
+ let w=prompt('Worker name');
+ if(!w) return;
+ complaints[i].worker=w;
+ complaints[i].status='Assigned';
+ save(); renderAll();
+}
+
+async function finish(i){
+ let file=document.getElementById('img'+i).files[0];
+ if(!file) return alert("Upload proof");
+
+ complaints[i].workerImg=await toBase64(file);
+ complaints[i].status='Completed';
+
+ save(); renderAll();
+}
+
+function approve(i){
+ complaints[i].status='Approved';
+ save(); renderAll();
+}
+
+function reject(i){
+ complaints[i].status='Rejected';
+ save(); renderAll();
+}
+
+/* STATS */
+function updateStats(){
+ let p=0,a=0,pr=0,c=0;
+
+ complaints.forEach(x=>{
+  if(x.status=='Pending')p++;
+  if(x.status=='Assigned')a++;
+  if(x.status=='Completed')c++;
+ });
+
+ pEl.innerText=p;
+ aEl.innerText=a;
+ prEl.innerText=0;
+ cEl.innerText=c;
+}
+
+const pEl=document.getElementById('p');
+const aEl=document.getElementById('a');
+const prEl=document.getElementById('pr');
+const cEl=document.getElementById('c');
+
+/* MAP */
+let map=L.map('map').setView([13,80],10);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+function renderMap(){
+ map.eachLayer(l=>{ if(l instanceof L.Marker) map.removeLayer(l); });
+
+ complaints.forEach(c=>{
+  L.marker([c.lat,c.lng]).addTo(map)
+   .bindPopup(c.status);
+ });
+}
+
+/* CHART */
+let chart;
+function renderChart(){
+ let data=[0,0,0];
+
+ complaints.forEach(c=>{
+  if(c.status=='Pending')data[0]++;
+  if(c.status=='Assigned')data[1]++;
+  if(c.status=='Completed')data[2]++;
+ });
+
+ if(chart) chart.destroy();
+
+ chart=new Chart(document.getElementById('chart'),{
+  type:'bar',
+  data:{
+   labels:['Pending','Assigned','Completed'],
+   datasets:[{ data:data }]
+  }
+ });
+}
+
+renderAll();
+
+</script>
+
+</body>
+</html>
