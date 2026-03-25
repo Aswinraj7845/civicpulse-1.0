@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CivicPulse Pro</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<style>
+
+/* 🌌 BACKGROUND */
+body{
+  font-family:'Segoe UI';
+  margin:0;
+  background:url('https://images.unsplash.com/photo-1518770660439-4636190af475') no-repeat center/cover fixed;
+  color:#2c2c2c;
+}
+
+/* NAVBAR */
+.navbar{
+  background:linear-gradient(90deg,#6d28d9,#9333ea);
+  color:white;
+  text-align:center;
+  padding:20px;
+  font-size:24px;
+  font-weight:bold;
+}
+
+/* CONTAINER */
+.container{ max-width:900px; margin:auto; padding:20px; }
+
+/* CARD */
+.card{
+  background:rgba(255,255,255,0.95);
+  padding:20px;
+  border-radius:15px;
+  margin-bottom:20px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.2);
+}
+
+/* BUTTONS */
+button{
+  padding:10px 15px;
+  border:none;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:bold;
+  margin:3px;
+}
+
+.btn-main{ background:#7c3aed; color:white; }
+.btn-main:hover{ background:#5b21b6; }
+
+.btn-alt{ background:#ede9fe; }
+
+/* GRID */
+.grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+
+.stat{ padding:10px; text-align:center; border-radius:10px; font-weight:bold; }
+.pending{ background:#fde68a; }
+.assigned{ background:#c4b5fd; }
+.progress{ background:#60a5fa; }
+.completed{ background:#4ade80; }
+
+/* MAP */
+#map{ height:300px; border-radius:10px; }
+
+/* PAGE */
+.page{ display:none; }
+.active{ display:block; }
+
+</style>
+</head>
+
+<body>
+
+<div class="navbar">💜 CivicPulse Smart System</div>
+
+<!-- HOME -->
+<div id="homePage" class="page active">
+<div class="container">
+
+<div class="card">
+<h3>📷 Report Complaint</h3>
+
+<input type="file" id="photoInput">
+
+<button class="btn-main" onclick="addComplaint()">Submit</button>
+<button class="btn-alt" onclick="openMapPage()">Map</button>
+<button class="btn-alt" onclick="openWorkerPage()">Workers</button>
+
+</div>
+
+<div class="grid">
+<div class="stat pending">Pending <span id="pending">0</span></div>
+<div class="stat assigned">Assigned <span id="assigned">0</span></div>
+<div class="stat progress">Progress <span id="progress">0</span></div>
+<div class="stat completed">Done <span id="completed">0</span></div>
+</div>
+
+<div id="list"></div>
+
+</div>
+</div>
+
+<!-- MAP -->
+<div id="mapPage" class="page">
+<div class="container">
+<button onclick="goHome()">⬅ Back</button>
+<div id="map"></div>
+</div>
+</div>
+
+<!-- WORKER -->
+<div id="workerPage" class="page">
+<div class="container">
+<button onclick="goHome()">⬅ Back</button>
+<div id="workerList"></div>
+</div>
+</div>
+
+<script>  
+
+let complaints = JSON.parse(localStorage.getItem("complaints")) || [];
+
+/* SAVE */
+function saveData(){
+localStorage.setItem("complaints",JSON.stringify(complaints));
+}
+
+/* MAP */
+let map = L.map('map').setView([13.0827,80.2707],12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+/* NAV */
+function openMapPage(){ switchPage("mapPage"); setTimeout(()=>map.invalidateSize(),200); renderMap(); }
+function openWorkerPage(){ switchPage("workerPage"); renderWorker(); }
+function goHome(){ switchPage("homePage"); }
+
+function switchPage(id){
+document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+document.getElementById(id).classList.add("active");
+}
+
+/* ADD (ONLY IMAGE) */
+async function addComplaint(){
+
+let file = document.getElementById("photoInput").files[0];
+
+if(!file){
+alert("⚠ Please upload image!");
+return;
+}
+
+let photo = await toBase64(file);
+
+navigator.geolocation.getCurrentPosition(p=>{
+
+complaints.unshift({
+lat:p.coords.latitude,
+lng:p.coords.longitude,
+photoData:photo,
+status:"Pending",
+worker:null,
+completionImage:null,
+feedback:null
+});
+
+saveData();
+renderAll();
+});
+}
+
+/* BASE64 */
+function toBase64(file){
+return new Promise(res=>{
+let r=new FileReader();
+r.onload=e=>res(e.target.result);
+r.readAsDataURL(file);
+});
+}
+
+/* RENDER */
+function renderAll(){
+renderList();
+updateUI();
+renderMap();
+}
+
+/* LIST (NO TITLE/DESC) */
+function renderList(){
+let list=document.getElementById("list");
+list.innerHTML="";
+
+complaints.forEach((c,i)=>{
+list.innerHTML+=`
+<div class="card">
+
+<span><b>Status:</b> ${c.status}</span><br><br>
+
+<img src="${c.photoData}" style="width:120px;border-radius:10px;"><br>
+
+${c.completionImage ? `<br><b>Completed:</b><br><img src="${c.completionImage}" style="width:120px;border-radius:10px;">` : ""}
+
+<button onclick="assign(${i})">Assign</button>
+
+</div>`;
+});
+}
+
+/* STATUS */
+function updateUI(){
+let p=0,a=0,pr=0,c=0;
+
+complaints.forEach(x=>{
+if(x.status==="Pending")p++;
+if(x.status==="Assigned")a++;
+if(x.status==="In Progress")pr++;
+if(x.status==="Completed")c++;
+});
+
+pending.innerText=p;
+assigned.innerText=a;
+progress.innerText=pr;
+completed.innerText=c;
+}
+
+/* MAP */
+function renderMap(){
+map.eachLayer(l=>{ if(l instanceof L.Marker) map.removeLayer(l); });
+
+complaints.forEach(c=>{
+L.marker([c.lat,c.lng]).addTo(map);
+});
+}
+
+/* ADMIN ASSIGN */
+function assign(i){
+let name=prompt("Enter worker name:");
+if(!name) return;
+
+complaints[i].worker=name;
+complaints[i].status="Assigned";
+
+saveData();
+renderAll();
+}
+
+/* WORKER UI (ONLY IMAGE UPLOAD) */
+function renderWorker(){
+let w=document.getElementById("workerList");
+w.innerHTML="";
+
+complaints.forEach((c,i)=>{
+if(c.worker){
+
+w.innerHTML+=`
+<div class="card">
+
+<h3>🛠 Work Assigned</h3>
+
+<p><b>Status:</b> ${c.status}</p>
+
+<input type="file" id="completeImg${i}">
+
+<button class="btn-main" onclick="complete(${i})">
+Upload Proof ✅
+</button>
+
+${c.completionImage ? `<br><img src="${c.completionImage}" style="width:120px;border-radius:10px;">` : ""}
+
+</div>`;
+}
+});
+}
+
+/* COMPLETE */
+async function complete(i){
+
+let file = document.getElementById(`completeImg${i}`).files[0];
+
+if(!file){
+alert("⚠ Upload image first!");
+return;
+}
+
+let img = await toBase64(file);
+
+complaints[i].completionImage = img;
+complaints[i].status="Completed";
+
+saveData();
+renderAll();
+renderWorker();
+}
+
+/* INIT */
+renderAll();
+
+</script>
+
+</body>
+</html>
